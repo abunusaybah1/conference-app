@@ -49,28 +49,29 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
   const [left, setLeft] = useState(false);
+  const [voice, setVoice] = useState<"clear" | "natural">("clear");
 
-  const roomOptions = useMemo<RoomOptions>(
-    () => ({
+  const roomOptions = useMemo<RoomOptions>(() => {
+    const natural = voice === "natural";
+    return {
       adaptiveStream: true,
       dynacast: true,
       audioCaptureDefaults: {
         echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        noiseSuppression: !natural,
+        autoGainControl: !natural,
       },
       videoCaptureDefaults: { resolution: VideoPresets.h360.resolution },
       publishDefaults: {
-        dtx: true,
+        dtx: !natural,
         red: false,
-        audioPreset: AudioPresets.speech,
+        audioPreset: natural ? { maxBitrate: 32_000 } : AudioPresets.speech,
         simulcast: true,
         videoEncoding: VideoPresets.h360.encoding,
         screenShareEncoding: ScreenSharePresets.h720fps5.encoding,
       },
-    }),
-    [],
-  );
+    };
+  }, [voice]);
 
   async function join() {
     setJoining(true);
@@ -113,6 +114,35 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
             placeholder="Your name"
             className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-2"
           />
+          <div className="space-y-1">
+            <p className="text-sm text-neutral-400">Microphone mode</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["clear", "Clear voice", "Reduces background noise"],
+                  [
+                    "natural",
+                    "Natural sound",
+                    "For recitation and long sounds",
+                  ],
+                ] as const
+              ).map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setVoice(value)}
+                  className={`rounded-md border px-3 py-2 text-left text-sm ${
+                    voice === value
+                      ? "border-emerald-500 bg-emerald-500/10"
+                      : "border-neutral-800 bg-neutral-900"
+                  }`}
+                >
+                  <span className="block font-medium">{label}</span>
+                  <span className="block text-xs text-neutral-400">{hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             onClick={join}
             disabled={!name.trim() || joining}

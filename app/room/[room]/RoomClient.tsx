@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
+  StartAudio,
   ControlBar,
   GridLayout,
   ParticipantTile,
@@ -13,6 +14,7 @@ import {
   useParticipants,
   useLocalParticipant,
   useLocalParticipantPermissions,
+  useMediaDeviceSelect,
   useRoomContext,
 } from "@livekit/components-react";
 import {
@@ -90,7 +92,7 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
 
   if (left) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center">
+      <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex items-center justify-center p-4">
         <p>The class has ended or you left.</p>
       </main>
     );
@@ -98,7 +100,7 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
 
   if (!token) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
+      <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex items-center justify-center p-4">
         <div className="w-full max-w-sm space-y-4">
           <h1 className="text-xl font-semibold">
             {hostKey ? "Start class" : "Join class"}
@@ -112,8 +114,9 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Your name"
-            className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-2"
+            className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3 text-base"
           />
+
           <div className="space-y-1">
             <p className="text-sm text-neutral-400">Microphone mode</p>
             <div className="grid grid-cols-2 gap-2">
@@ -143,10 +146,11 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
               ))}
             </div>
           </div>
+
           <button
             onClick={join}
             disabled={!name.trim() || joining}
-            className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 font-medium"
+            className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-3 font-medium"
           >
             {joining ? "Connecting…" : "Continue"}
           </button>
@@ -166,10 +170,9 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
       video={isHost && mode === "video"}
       options={roomOptions}
       onDisconnected={() => setLeft(true)}
-      className="!h-screen flex flex-col bg-neutral-950"
+      className="!h-dvh flex flex-col bg-neutral-950"
     >
       <Classroom room={room} token={token} isHost={isHost} mode={mode} />
-      <RoomAudioRenderer />
     </LiveKitRoom>
   );
 }
@@ -243,8 +246,17 @@ function Classroom({
   const permissions = useLocalParticipantPermissions();
   const participants = useParticipants();
 
-  const [panel, setPanel] = useState<"chat" | "people" | null>("chat");
+  // Side panel on desktop; closed by default on phones (it opens as a sheet)
+  const [panel, setPanel] = useState<"chat" | "people" | null>(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(min-width: 768px)").matches
+      ? "chat"
+      : null,
+  );
   const [notice, setNotice] = useState("");
+  const [showSpeaker, setShowSpeaker] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [speakerMuted, setSpeakerMuted] = useState(false);
   const [dataSaver, setDataSaver] = useState(
     () =>
       typeof navigator !== "undefined" &&
@@ -305,13 +317,20 @@ function Classroom({
   }
 
   const btn =
-    "rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800";
+    "shrink-0 rounded border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800";
 
   return (
     <>
-      <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-neutral-800 text-sm text-neutral-300">
-        <div className="flex items-center gap-3">
-          <span className="font-medium">
+      {/* Plays everyone's audio. Volume 0 = speaker muted for me only. */}
+      <RoomAudioRenderer volume={speakerMuted ? 0 : volume} />
+      <StartAudio
+        label="Tap to enable sound"
+        className="mx-3 mt-2 rounded bg-emerald-600 px-3 py-2 text-sm font-medium"
+      />
+
+      <header className="px-3 py-2 border-b border-neutral-800 text-sm text-neutral-300 space-y-2 md:space-y-0 md:flex md:items-center md:justify-between md:gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-medium truncate">
             {isHost
               ? "You are the host"
               : iCanPresent
@@ -319,7 +338,7 @@ function Classroom({
                 : "Live class"}
           </span>
           <span
-            className={`rounded-full px-2 py-0.5 text-xs ${
+            className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
               videoLive
                 ? "bg-emerald-500/15 text-emerald-300"
                 : "bg-neutral-800 text-neutral-300"
@@ -327,10 +346,10 @@ function Classroom({
           >
             {videoLive ? "Video live" : "Audio"}
           </span>
-          <span className="font-mono text-neutral-400">{elapsed}</span>
+          <span className="shrink-0 font-mono text-neutral-400">{elapsed}</span>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 md:flex-wrap md:overflow-visible">
           {!isHost && (
             <button onClick={toggleHand} className={btn}>
               {handUp ? "Lower hand ✋" : "Raise hand ✋"}
@@ -347,11 +366,11 @@ function Classroom({
                 Mute all
               </button>
               <button onClick={copyStudentLink} className={btn}>
-                Copy student link
+                Copy link
               </button>
               <button
                 onClick={endClass}
-                className="rounded border border-red-800 text-red-300 px-3 py-1 text-sm hover:bg-red-950"
+                className="shrink-0 rounded border border-red-800 text-red-300 px-3 py-1.5 text-sm hover:bg-red-950"
               >
                 End class
               </button>
@@ -379,11 +398,11 @@ function Classroom({
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0">
-        <div className="flex-1 min-w-0 p-2 flex flex-col">
+      <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+        <div className="flex-1 min-w-0 min-h-0 p-2 flex flex-col">
           <div className="flex-1 min-h-0">
             {presenters.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-neutral-400">
+              <div className="h-full flex items-center justify-center text-neutral-400 text-center px-4">
                 Waiting for the teacher to start…
               </div>
             ) : dataSaver && !iCanPresent ? (
@@ -414,34 +433,167 @@ function Classroom({
           </div>
         </div>
 
-        {panel && (
-          <aside className="w-80 border-l border-neutral-800 min-h-0 flex flex-col">
-            <div
-              style={{
-                display: panel === "chat" ? "block" : "none",
-                height: "100%",
-              }}
-            >
-              <Chat style={{ height: "100%" }} />
-            </div>
-            {panel === "people" && (
-              <PeoplePanel
-                isHost={isHost}
-                participants={participants}
-                onAction={manage}
-              />
-            )}
-          </aside>
-        )}
+        {/* Always mounted so chat history is kept when the panel is closed.
+            Bottom sheet on phones, side panel from md up. */}
+        <aside
+          className={`${
+            panel ? "flex" : "hidden"
+          } fixed inset-x-0 bottom-0 z-30 h-[70dvh] flex-col rounded-t-2xl border-t border-neutral-800 bg-neutral-950 shadow-2xl md:static md:z-auto md:h-auto md:w-80 md:rounded-none md:border-l md:border-t-0 md:shadow-none`}
+        >
+          <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-800 md:hidden">
+            <span className="text-sm font-medium">
+              {panel === "people" ? "People" : "Chat"}
+            </span>
+            <button onClick={() => setPanel(null)} className={btn}>
+              Close
+            </button>
+          </div>
+
+          <div className={panel === "chat" ? "flex-1 min-h-0" : "hidden"}>
+            <Chat style={{ height: "100%" }} />
+          </div>
+
+          {panel === "people" && (
+            <PeoplePanel
+              isHost={isHost}
+              participants={participants}
+              onAction={manage}
+            />
+          )}
+        </aside>
       </div>
 
-      {/* Mic button shows for everyone who may talk. Camera and screen share
-          show only for the host and anyone the host has allowed. */}
-      <ControlBar
-        variation="minimal"
-        controls={{ chat: false, settings: false, leave: true }}
-      />
+      {showSpeaker && (
+        <SpeakerMenu
+          volume={volume}
+          muted={speakerMuted}
+          onVolume={setVolume}
+          onMuted={setSpeakerMuted}
+          onClose={() => setShowSpeaker(false)}
+        />
+      )}
+
+      {/* Mic button for everyone who may talk. Camera and screen share only
+          for the host and anyone the host has allowed. */}
+      <div className="flex items-center justify-center gap-2 px-2 pb-[env(safe-area-inset-bottom)] border-t border-neutral-800">
+        <div className="min-w-0 overflow-x-auto">
+          <ControlBar
+            variation="minimal"
+            controls={{ chat: false, settings: false, leave: true }}
+            className="!border-0"
+          />
+        </div>
+        <button
+          onClick={() => setShowSpeaker((v) => !v)}
+          className="shrink-0 rounded-md bg-neutral-800 hover:bg-neutral-700 px-3 py-2 text-sm"
+          aria-label="Speaker settings"
+        >
+          {speakerMuted ? "🔇" : "🔊"} Speaker
+        </button>
+      </div>
     </>
+  );
+}
+
+/* ---------------- speaker controls ---------------- */
+
+function SpeakerMenu({
+  volume,
+  muted,
+  onVolume,
+  onMuted,
+  onClose,
+}: {
+  volume: number;
+  muted: boolean;
+  onVolume: (v: number) => void;
+  onMuted: (m: boolean) => void;
+  onClose: () => void;
+}) {
+  // requestPermissions: false so listeners are not asked for the microphone
+  const { devices, activeDeviceId, setActiveMediaDevice } =
+    useMediaDeviceSelect({
+      kind: "audiooutput",
+      requestPermissions: false,
+    });
+  const [msg, setMsg] = useState("");
+
+  const canPickOutput =
+    typeof HTMLMediaElement !== "undefined" &&
+    "setSinkId" in HTMLMediaElement.prototype;
+
+  async function pick(id: string) {
+    try {
+      await setActiveMediaDevice(id);
+      setMsg("");
+    } catch {
+      setMsg("Could not switch to that output.");
+    }
+  }
+
+  return (
+    <div className="fixed inset-x-3 bottom-24 z-40 rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-xl md:inset-x-auto md:right-4 md:w-80 space-y-4 text-sm">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">Speaker</h3>
+        <button
+          onClick={onClose}
+          className="rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800"
+        >
+          Close
+        </button>
+      </div>
+
+      <button
+        onClick={() => onMuted(!muted)}
+        className={`w-full rounded-md px-3 py-2 font-medium ${
+          muted ? "bg-red-900/50 text-red-200" : "bg-neutral-800"
+        }`}
+      >
+        {muted ? "🔇 Speaker muted — tap to unmute" : "🔊 Mute speaker"}
+      </button>
+
+      <div>
+        <label className="text-neutral-400 text-xs">Volume</label>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(volume * 100)}
+          disabled={muted}
+          onChange={(e) => onVolume(Number(e.target.value) / 100)}
+          className="w-full accent-emerald-500"
+        />
+      </div>
+
+      <div>
+        <p className="text-neutral-400 text-xs mb-1">Play sound through</p>
+        {canPickOutput && devices.length > 0 ? (
+          <ul className="space-y-1">
+            {devices.map((d, i) => (
+              <li key={d.deviceId}>
+                <button
+                  onClick={() => pick(d.deviceId)}
+                  className={`w-full text-left rounded-md border px-3 py-2 ${
+                    activeDeviceId === d.deviceId
+                      ? "border-emerald-500 bg-emerald-500/10"
+                      : "border-neutral-800 hover:bg-neutral-800"
+                  }`}
+                >
+                  {d.label || `Speaker ${i + 1}`}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-neutral-400 text-xs">
+            Your browser doesn&apos;t let websites choose the audio output. Use
+            your phone&apos;s volume buttons, or connect headphones or Bluetooth
+            to change where sound plays.
+          </p>
+        )}
+        {msg && <p className="text-red-400 text-xs mt-1">{msg}</p>}
+      </div>
+    </div>
   );
 }
 
@@ -455,16 +607,16 @@ function AudioStage({
   total: number;
 }) {
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-6 text-neutral-200">
-      <div className="flex gap-4 flex-wrap justify-center">
+    <div className="h-full flex flex-col items-center justify-center gap-4 text-neutral-200 px-2 text-center">
+      <div className="flex gap-3 flex-wrap justify-center">
         {presenters.map((p) => (
           <div
             key={p.identity}
-            className={`rounded-full w-28 h-28 flex items-center justify-center text-center text-sm px-2 border-4 transition bg-neutral-900 ${
+            className={`rounded-full w-20 h-20 md:w-28 md:h-28 flex items-center justify-center text-center text-xs md:text-sm px-2 border-4 transition bg-neutral-900 ${
               p.isSpeaking ? "border-emerald-500" : "border-neutral-800"
             }`}
           >
-            {p.name || "Speaker"}
+            <span className="line-clamp-2">{p.name || "Speaker"}</span>
           </div>
         ))}
       </div>
@@ -498,7 +650,7 @@ function PeoplePanel({
 
   const presentersFull = presenters.length >= MAX_PRESENTERS;
   const small =
-    "rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-800 disabled:opacity-40";
+    "rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-40";
 
   function MicIcon({ p }: { p: Participant }) {
     if (!canTalk(p)) return <span title="Mic blocked">🚫</span>;
@@ -591,7 +743,6 @@ function PeoplePanel({
                   {p.isLocal ? " (you)" : ""}
                 </span>
               </span>
-              {/* the host can't be demoted by themselves */}
               <HostButtons p={p} video="remove" />
             </li>
           ))}
@@ -650,7 +801,7 @@ function PeoplePanel({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search people"
-          className="w-full mb-2 rounded bg-neutral-900 border border-neutral-800 px-2 py-1 text-sm"
+          className="w-full mb-2 rounded bg-neutral-900 border border-neutral-800 px-2 py-2 text-sm"
         />
         <ul className="space-y-2">
           {others.slice(0, limit).map((p) => (

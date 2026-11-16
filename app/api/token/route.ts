@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { AccessToken } from "livekit-server-sdk";
 import { ROOM_NAME_RE, parseMode, verifyHostKey } from "@/lib/room-keys";
+import { AccessToken, TrackSource } from "livekit-server-sdk";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
@@ -31,14 +31,17 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  token.addGrant({
-    room,
-    roomJoin: true,
-    canSubscribe: true,
-    canPublish: isHost, // students listen/watch only for now
-    canPublishData: true, // chat
-    roomAdmin: isHost,
-  });
+   token.addGrant({
+     room,
+     roomJoin: true,
+     canSubscribe: true,
+     canPublish: true,
+     // Students: microphone only. The host can publish everything.
+     ...(isHost ? {} : { canPublishSources: [TrackSource.MICROPHONE] }),
+     canPublishData: true,
+     canUpdateOwnMetadata: true,
+     roomAdmin: isHost,
+   });
 
   return NextResponse.json({ token: await token.toJwt(), isHost });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import "@livekit/components-styles";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -18,7 +18,6 @@ import {
   useRoomContext,
 } from "@livekit/components-react";
 import {
-  AudioPresets,
   RoomEvent,
   ScreenSharePresets,
   Track,
@@ -27,7 +26,6 @@ import {
   type RoomOptions,
 } from "livekit-client";
 
-type Mode = "audio" | "video";
 type Action =
   | "mute"
   | "muteAll"
@@ -42,38 +40,78 @@ type Action =
 const MAX_PRESENTERS = 10;
 const SOURCE_CAMERA = 1; // LiveKit TrackSource.CAMERA
 
-type Props = { room: string; mode: Mode; hostKey: string };
+// One setting for everyone: faithful sound (long sounds and recitation are not
+// filtered out) at a small, steady 32 kbps. Audio is only sent while a mic is on.
+const ROOM_OPTIONS: RoomOptions = {
+  adaptiveStream: true, // only download video at the size it is shown
+  dynacast: true, // publisher stops sending video nobody is watching
+  audioCaptureDefaults: {
+    echoCancellation: true,
+    noiseSuppression: false,
+    autoGainControl: false,
+  },
+  videoCaptureDefaults: { resolution: VideoPresets.h360.resolution },
+  publishDefaults: {
+    dtx: false,
+    red: false,
+    audioPreset: { maxBitrate: 32_000 },
+    simulcast: true,
+    videoEncoding: VideoPresets.h360.encoding,
+    screenShareEncoding: ScreenSharePresets.h720fps5.encoding,
+  },
+};
 
-export default function RoomClient({ room, mode, hostKey }: Props) {
+/* ---------------- saved session (survives a page reload) ---------------- */
+
+type Saved = { token: string; name: string; isHost: boolean };
+const sessionKey = (room: string) => `lk-session:${room}`;
+
+function tokenStillValid(token: string) {
+  try {
+    const payload = JSON.parse(
+      atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return (
+      typeof payload.exp === "number" &&
+      payload.exp * 1000 > Date.now() + 60_000
+    );
+  } catch {
+    return false;
+  }
+}
+
+type Props = { room: string; hostKey: string };
+
+export default function RoomClient({ room, hostKey }: Props) {
   const [name, setName] = useState("");
   const [token, setToken] = useState("");
   const [isHost, setIsHost] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
   const [left, setLeft] = useState(false);
-  const [voice, setVoice] = useState<"clear" | "natural">("clear");
 
-  const roomOptions = useMemo<RoomOptions>(() => {
-    const natural = voice === "natural";
-    return {
-      adaptiveStream: true,
-      dynacast: true,
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: !natural,
-        autoGainControl: !natural,
-      },
-      videoCaptureDefaults: { resolution: VideoPresets.h360.resolution },
-      publishDefaults: {
-        dtx: !natural,
-        red: false,
-        audioPreset: natural ? { maxBitrate: 32_000 } : AudioPresets.speech,
-        simulcast: true,
-        videoEncoding: VideoPresets.h360.encoding,
-        screenShareEncoding: ScreenSharePresets.h720fps5.encoding,
-      },
-    };
-  }, [voice]);
+  // On load / refresh: reconnect automatically if this tab already joined
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(sessionKey(room));
+      if (raw) {
+        const saved = JSON.parse(raw) as Saved;
+        if (saved.token && tokenStillValid(saved.token)) {
+          setName(saved.name);
+          setToken(saved.token);
+          setIsHost(saved.isHost);
+          setRestoring(false);
+          return;
+        }
+        sessionStorage.removeItem(sessionKey(room));
+      }
+      setName(localStorage.getItem("lk-name") ?? "");
+    } catch {
+      // storage unavailable (private mode) — just show the name screen
+    }
+    setRestoring(false);
+  }, [room]);
 
   async function join() {
     setJoining(true);
@@ -81,19 +119,60 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
     const res = await fetch("/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room, name, mode, hostKey }),
+      body: JSON.stringify({ room, name, hostKey }),
     });
     const data = await res.json();
     setJoining(false);
     if (!res.ok) return setError(data.error ?? "Could not join");
+
+    try {
+      const saved: Saved = {
+        token: data.token,
+        name: name.trim(),
+        isHost: data.isHost,
+      };
+      sessionStorage.setItem(sessionKey(room), JSON.stringify(saved));
+      localStorage.setItem("lk-name", name.trim());
+    } catch {
+      // ignore
+    }
     setToken(data.token);
     setIsHost(data.isHost);
   }
 
+  function handleDisconnected() {
+    try {
+      sessionStorage.removeItem(sessionKey(room));
+    } catch {
+      // ignore
+    }
+    setLeft(true);
+  }
+
+  function joinAgain() {
+    setLeft(false);
+    setToken("");
+    setIsHost(false);
+  }
+
+  if (restoring) {
+    return (
+      <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex items-center justify-center">
+        <p className="text-neutral-400">Loading…</p>
+      </main>
+    );
+  }
+
   if (left) {
     return (
-      <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex items-center justify-center p-4">
-        <p>The class has ended or you left.</p>
+      <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4 p-4">
+        <p>You left the class, or it has ended.</p>
+        <button
+          onClick={joinAgain}
+          className="rounded-md bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-medium"
+        >
+          Join again
+        </button>
       </main>
     );
   }
@@ -106,47 +185,19 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
             {hostKey ? "Start class" : "Join class"}
           </h1>
           <p className="text-sm text-neutral-400">
-            {mode === "audio"
-              ? "Starts as audio-only — uses very little data."
-              : "Starts with video — quality adjusts to your connection."}
+            {hostKey
+              ? "Your mic starts on. You can turn your camera on at any time."
+              : "You join muted. Tap the mic whenever you want to speak."}
           </p>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && name.trim() && !joining) join();
+            }}
             placeholder="Your name"
             className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3 text-base"
           />
-
-          <div className="space-y-1">
-            <p className="text-sm text-neutral-400">Microphone mode</p>
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  ["clear", "Clear voice", "Reduces background noise"],
-                  [
-                    "natural",
-                    "Natural sound",
-                    "For recitation and long sounds",
-                  ],
-                ] as const
-              ).map(([value, label, hint]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setVoice(value)}
-                  className={`rounded-md border px-3 py-2 text-left text-sm ${
-                    voice === value
-                      ? "border-emerald-500 bg-emerald-500/10"
-                      : "border-neutral-800 bg-neutral-900"
-                  }`}
-                >
-                  <span className="block font-medium">{label}</span>
-                  <span className="block text-xs text-neutral-400">{hint}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           <button
             onClick={join}
             disabled={!name.trim() || joining}
@@ -167,12 +218,12 @@ export default function RoomClient({ room, mode, hostKey }: Props) {
       token={token}
       connect
       audio={isHost} // students join muted and unmute when they want to talk
-      video={isHost && mode === "video"}
-      options={roomOptions}
-      onDisconnected={() => setLeft(true)}
+      video={false} // anyone allowed can turn the camera on later
+      options={ROOM_OPTIONS}
+      onDisconnected={handleDisconnected}
       className="!h-dvh flex flex-col bg-neutral-950"
     >
-      <Classroom room={room} token={token} isHost={isHost} mode={mode} />
+      <Classroom room={room} token={token} isHost={isHost} />
     </LiveKitRoom>
   );
 }
@@ -232,12 +283,10 @@ function Classroom({
   room,
   token,
   isHost,
-  mode,
 }: {
   room: string;
   token: string;
   isHost: boolean;
-  mode: Mode;
 }) {
   useRoomRerender();
 
@@ -307,8 +356,9 @@ function Classroom({
   }
 
   async function copyStudentLink() {
-    const url = `${window.location.origin}/room/${room}?mode=${mode}`;
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(
+      `${window.location.origin}/room/${room}`,
+    );
     flash("Student link copied");
   }
 
@@ -438,7 +488,7 @@ function Classroom({
         <aside
           className={`${
             panel ? "flex" : "hidden"
-          } fixed inset-x-0 bottom-0 z-30 h-[70dvh] flex-col rounded-t-2xl border-t border-neutral-800 bg-neutral-950 shadow-2xl md:static md:z-auto md:h-auto md:w-80 md:rounded-none md:border-l md:border-t-0 md:shadow-none`}
+          } fixed inset-x-0 bottom-0 z-30 h-[70dvh] flex-col rounded-t-2xl border-t border-neutral-800 bg-neutral-950 shadow-2xl md:static md:z-auto md:h-auto md:w-80 md:shrink-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none`}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-800 md:hidden">
             <span className="text-sm font-medium">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { ROOM_NAME_RE, parseMode, verifyHostKey } from "@/lib/room-keys";
 import { AccessToken, TrackSource } from "livekit-server-sdk";
+import { ROOM_NAME_RE, verifyHostKey } from "@/lib/room-keys";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
@@ -9,7 +9,6 @@ export async function POST(request: NextRequest) {
   const name = String(body.name ?? "")
     .trim()
     .slice(0, 60);
-  const mode = parseMode(body.mode);
   const hostKey = typeof body.hostKey === "string" ? body.hostKey : "";
 
   if (!ROOM_NAME_RE.test(room)) {
@@ -19,7 +18,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
 
-  const isHost = hostKey !== "" && verifyHostKey(room, mode, hostKey);
+  const isHost = hostKey !== "" && verifyHostKey(room, hostKey);
 
   const token = new AccessToken(
     process.env.LIVEKIT_API_KEY!,
@@ -31,17 +30,17 @@ export async function POST(request: NextRequest) {
     },
   );
 
-   token.addGrant({
-     room,
-     roomJoin: true,
-     canSubscribe: true,
-     canPublish: true,
-     // Students: microphone only. The host can publish everything.
-     ...(isHost ? {} : { canPublishSources: [TrackSource.MICROPHONE] }),
-     canPublishData: true,
-     canUpdateOwnMetadata: true,
-     roomAdmin: isHost,
-   });
+  token.addGrant({
+    room,
+    roomJoin: true,
+    canSubscribe: true,
+    canPublish: true,
+    // Students: microphone only. The host can publish everything.
+    ...(isHost ? {} : { canPublishSources: [TrackSource.MICROPHONE] }),
+    canPublishData: true,
+    canUpdateOwnMetadata: true,
+    roomAdmin: isHost,
+  });
 
   return NextResponse.json({ token: await token.toJwt(), isHost });
 }

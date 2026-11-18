@@ -4,7 +4,6 @@ import { useState } from "react";
 
 export default function Home() {
   const [passcode, setPasscode] = useState("");
-  const [mode, setMode] = useState<"audio" | "video">("audio");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [links, setLinks] = useState<{ host: string; join: string } | null>(
@@ -17,7 +16,7 @@ export default function Home() {
     const res = await fetch("/api/rooms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode, mode }),
+      body: JSON.stringify({ passcode }),
     });
     const data = await res.json();
     setLoading(false);
@@ -29,7 +28,7 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
+    <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
         <h1 className="text-2xl font-semibold">Start a live class</h1>
 
@@ -39,32 +38,16 @@ export default function Home() {
             type="password"
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-2"
+            className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3"
           />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          {(["audio", "video"] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`rounded-md border px-3 py-3 text-sm ${
-                mode === m
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-neutral-800 bg-neutral-900"
-              }`}
-            >
-              {m === "audio" ? "Audio only" : "Video + audio"}
-            </button>
-          ))}
         </div>
 
         <button
           onClick={create}
           disabled={loading || !passcode}
-          className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 font-medium"
+          className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-3 font-medium"
         >
-          {loading ? "Creating…" : "Create class"}
+          {loading ? "Creating…" : "Start class"}
         </button>
 
         {error && <p className="text-sm text-red-400">{error}</p>}

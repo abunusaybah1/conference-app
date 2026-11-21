@@ -16,6 +16,7 @@ import {
   useLocalParticipantPermissions,
   useMediaDeviceSelect,
   useRoomContext,
+  useIsRecording,
 } from "@livekit/components-react";
 import {
   RoomEvent,
@@ -25,6 +26,7 @@ import {
   type Participant,
   type RoomOptions,
 } from "livekit-client";
+import RecordButton from "@/components/RecordButton";
 
 type Action =
   | "mute"
@@ -80,38 +82,45 @@ function tokenStillValid(token: string) {
   }
 }
 
+// Reads the saved session once, in the browser. This component is never
+// rendered on the server (see RoomShell), so reading storage here is safe.
+function readSaved(room: string): Saved | null {
+  try {
+    const raw = sessionStorage.getItem(sessionKey(room));
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Saved;
+    if (saved.token && tokenStillValid(saved.token)) return saved;
+    sessionStorage.removeItem(sessionKey(room));
+  } catch {
+    // storage unavailable (private mode): just show the join screen
+  }
+  return null;
+}
+
+function readStored(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 type Props = { room: string; hostKey: string };
 
 export default function RoomClient({ room, hostKey }: Props) {
-  const [name, setName] = useState("");
-  const [token, setToken] = useState("");
-  const [isHost, setIsHost] = useState(false);
-  const [restoring, setRestoring] = useState(true);
+  // On load / refresh: reconnect automatically if this tab already joined
+  const [saved] = useState(() => readSaved(room));
+  const [name, setName] = useState(() => saved?.name ?? readStored("lk-name"));
+  const [email, setEmail] = useState(() => readStored("lk-email"));
+  const [token, setToken] = useState(saved?.token ?? "");
+  const [isHost, setIsHost] = useState(saved?.isHost ?? false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
   const [left, setLeft] = useState(false);
 
-  // On load / refresh: reconnect automatically if this tab already joined
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(sessionKey(room));
-      if (raw) {
-        const saved = JSON.parse(raw) as Saved;
-        if (saved.token && tokenStillValid(saved.token)) {
-          setName(saved.name);
-          setToken(saved.token);
-          setIsHost(saved.isHost);
-          setRestoring(false);
-          return;
-        }
-        sessionStorage.removeItem(sessionKey(room));
-      }
-      setName(localStorage.getItem("lk-name") ?? "");
-    } catch {
-      // storage unavailable (private mode) — just show the name screen
-    }
-    setRestoring(false);
-  }, [room]);
+  const canJoin = name.trim() !== "" && EMAIL_RE.test(email.trim());
 
   async function join() {
     setJoining(true);
@@ -119,9 +128,9 @@ export default function RoomClient({ room, hostKey }: Props) {
     const res = await fetch("/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room, name, hostKey }),
+      body: JSON.stringify({ room, name, email, hostKey }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setJoining(false);
     if (!res.ok) return setError(data.error ?? "Could not join");
 
@@ -133,6 +142,7 @@ export default function RoomClient({ room, hostKey }: Props) {
       };
       sessionStorage.setItem(sessionKey(room), JSON.stringify(saved));
       localStorage.setItem("lk-name", name.trim());
+      localStorage.setItem("lk-email", email.trim());
     } catch {
       // ignore
     }
@@ -155,18 +165,13 @@ export default function RoomClient({ room, hostKey }: Props) {
     setIsHost(false);
   }
 
-  if (restoring) {
-    return (
-      <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex items-center justify-center">
-        <p className="text-neutral-400">Loading…</p>
-      </main>
-    );
-  }
-
   if (left) {
     return (
       <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4 p-4">
         <p>You left the class, or it has ended.</p>
+        <p className="max-w-xs text-center text-sm text-neutral-400">
+          If the class was recorded, a download link will be emailed to you.
+        </p>
         <button
           onClick={joinAgain}
           className="rounded-md bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-medium"
@@ -192,15 +197,28 @@ export default function RoomClient({ room, hostKey }: Props) {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && name.trim() && !joining) join();
-            }}
             placeholder="Your name"
             className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3 text-base"
           />
+          <input
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && canJoin && !joining) join();
+            }}
+            placeholder="Your email"
+            className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3 text-base"
+          />
+          <p className="text-xs text-neutral-500">
+            If the class is recorded, we email you a link to download the audio.
+            The link works for 48 hours.
+          </p>
           <button
             onClick={join}
-            disabled={!name.trim() || joining}
+            disabled={!canJoin || joining}
             className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-3 font-medium"
           >
             {joining ? "Connecting…" : "Continue"}
@@ -294,6 +312,7 @@ function Classroom({
   const { localParticipant } = useLocalParticipant();
   const permissions = useLocalParticipantPermissions();
   const participants = useParticipants();
+  const isRecording = useIsRecording();
 
   // Side panel on desktop; closed by default on phones (it opens as a sheet)
   const [panel, setPanel] = useState<"chat" | "people" | null>(() =>
@@ -418,6 +437,7 @@ function Classroom({
               <button onClick={copyStudentLink} className={btn}>
                 Copy link
               </button>
+              <RecordButton token={token} />
               <button
                 onClick={endClass}
                 className="shrink-0 rounded border border-red-800 text-red-300 px-3 py-1.5 text-sm hover:bg-red-950"
@@ -441,6 +461,13 @@ function Classroom({
           </button>
         </div>
       </header>
+
+      {isRecording && (
+        <div className="flex items-center gap-2 bg-red-950 px-4 py-1 text-sm text-red-200">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+          This class is being recorded (audio only)
+        </div>
+      )}
 
       {(notice || micBlocked) && (
         <div className="bg-emerald-900/40 text-emerald-200 text-sm px-4 py-1">

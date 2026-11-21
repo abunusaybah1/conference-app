@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import RoomClient from "./RoomClient";
+import RoomShell from "./RoomShell";
 
 type Props = {
   params: Promise<{ room: string }>;
@@ -10,7 +10,7 @@ async function RoomLoader({ params, searchParams }: Props) {
   const { room } = await params;
   const { hk } = await searchParams;
 
-  return <RoomClient room={room} hostKey={hk ?? ""} />;
+  return <RoomShell room={room} hostKey={hk ?? ""} />;
 }
 
 export default function RoomPage(props: Props) {

@@ -21,6 +21,7 @@ export default function RecordingLinks({
   isHost: boolean;
 }) {
   const [items, setItems] = useState<Item[] | null>(null); // null = checking
+  const [problem, setProblem] = useState("");
   const [copied, setCopied] = useState("");
 
   useEffect(() => {
@@ -33,15 +34,24 @@ export default function RecordingLinks({
         const res = await fetch("/api/recording/latest", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const data = res.ok ? await res.json() : { recordings: [] };
+        const data = await res.json().catch(() => ({}));
         if (cancelled) return;
+        if (!res.ok) {
+          setProblem(data.error ?? `Could not check (${res.status})`);
+          setItems([]);
+          return;
+        }
+        setProblem("");
         const list: Item[] = data.recordings ?? [];
         setItems(list);
         if (list.some((r) => r.status === "recording") && ++tries < 40) {
           timer = setTimeout(load, 3000);
         }
       } catch {
-        if (!cancelled) setItems([]);
+        if (!cancelled) {
+          setProblem("Network error while checking for the recording");
+          setItems([]);
+        }
       }
     }
 
@@ -69,7 +79,25 @@ export default function RecordingLinks({
       <p className="text-sm text-neutral-400">Checking for a recording…</p>
     );
   }
-  if (items.length === 0) return null;
+
+  if (problem) {
+    return (
+      <p className="max-w-xs text-center text-sm text-red-400">
+        {isHost
+          ? `Recording problem: ${problem}`
+          : "Could not load the recording."}
+      </p>
+    );
+  }
+
+  if (items.length === 0) {
+    return isHost ? (
+      <p className="max-w-xs text-center text-sm text-neutral-400">
+        No recording was found for this class. Press “Record audio” during the
+        class; a red “being recorded” bar shows while it is on.
+      </p>
+    ) : null;
+  }
 
   return (
     <div className="w-full max-w-sm space-y-3">
@@ -80,11 +108,21 @@ export default function RecordingLinks({
         >
           <p className="text-sm font-medium">Class recording (audio)</p>
 
-          {r.status === "recording" ? (
+          {r.status === "recording" && (
             <p className="text-sm text-neutral-400">
               Preparing the recording… this takes a few seconds.
             </p>
-          ) : (
+          )}
+
+          {r.status === "failed" && (
+            <p className="text-sm text-red-400">
+              {isHost
+                ? "This recording could not be saved. The reason is in the server log."
+                : "This recording could not be saved."}
+            </p>
+          )}
+
+          {r.status === "ready" && (
             <>
               <p className="text-xs text-neutral-400">
                 {r.duration_seconds

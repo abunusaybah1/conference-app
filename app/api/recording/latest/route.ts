@@ -16,21 +16,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not allowed" }, { status: 401 });
   }
 
-  const { data } = await supabaseAdmin()
-    .from("recordings")
-    .select(RECORDING_COLUMNS)
-    .eq("room_name", member.room)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(5);
-
   try {
+    const { data, error } = await supabaseAdmin()
+      .from("recordings")
+      .select(RECORDING_COLUMNS)
+      .eq("room_name", member.room)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (error) throw new Error(`Database: ${error.message}`);
+
     const rows = await Promise.all(
       ((data ?? []) as RecordingRow[]).map(refreshRecording),
     );
     return NextResponse.json({
       recordings: rows
-        .filter((r) => r.status === "recording" || isDownloadable(r))
+        .filter((r) => r.status !== "ready" || isDownloadable(r))
         .map((r) => ({
           id: r.id,
           status: r.status,
@@ -42,6 +43,9 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("latest recordings failed", err);
-    return NextResponse.json({ error: "Try again" }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message.slice(0, 200) : "Try again" },
+      { status: 500 },
+    );
   }
 }

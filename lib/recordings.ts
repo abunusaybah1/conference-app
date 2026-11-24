@@ -83,13 +83,19 @@ export async function refreshRecording(
     });
   }
 
-  if (
-    info.status === EgressStatus.EGRESS_FAILED ||
-    info.status === EgressStatus.EGRESS_ABORTED ||
-    reachedLimit
-  ) {
-    return settle({ status: "failed" });
-  }
+   if (
+     info.status === EgressStatus.EGRESS_FAILED ||
+     info.status === EgressStatus.EGRESS_ABORTED ||
+     reachedLimit
+   ) {
+     console.error(
+       "recording failed:",
+       row.egress_id,
+       EgressStatus[info.status],
+       info.error,
+     );
+     return settle({ status: "failed" });
+   }
 
   return row; // still starting, active or ending
 }

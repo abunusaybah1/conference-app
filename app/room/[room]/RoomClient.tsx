@@ -419,7 +419,7 @@ function Classroom({
               <button onClick={copyStudentLink} className={btn}>
                 Copy link
               </button>
-              <RecordButton token={token} />
+              <RecordButton token={token} notify={flash} />
               <button
                 onClick={endClass}
                 className="shrink-0 rounded border border-red-800 text-red-300 px-3 py-1.5 text-sm hover:bg-red-950"

@@ -3,16 +3,16 @@ import { getActiveEgress, getEgressClient, startRecording } from "@/lib/egress";
 import { getHostRoom } from "@/lib/host-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
+function fail(message: string, status = 500) {
+  return NextResponse.json({ error: message.slice(0, 200) }, { status });
+}
+
 export async function POST(req: NextRequest) {
   const room = await getHostRoom(req);
-  if (!room) {
-    return NextResponse.json({ error: "Host only" }, { status: 403 });
-  }
+  if (!room) return fail("Host only", 403);
 
   try {
-    if (await getActiveEgress(room)) {
-      return NextResponse.json({ error: "Already recording" }, { status: 409 });
-    }
+    if (await getActiveEgress(room)) return fail("Already recording", 409);
 
     const { egressId, filepath } = await startRecording(room);
 
@@ -23,23 +23,19 @@ export async function POST(req: NextRequest) {
     });
 
     if (error) {
-      // Don't record something we can't track or email
+      // Don't record something we can't track
       console.error("could not save recording row", error);
       await getEgressClient()
         .stopEgress(egressId)
         .catch(() => {});
-      return NextResponse.json(
-        { error: "Could not start recording" },
-        { status: 500 },
-      );
+      return fail(`Database: ${error.message}`);
     }
 
     return NextResponse.json({ egressId });
   } catch (err) {
     console.error("start recording failed", err);
-    return NextResponse.json(
-      { error: "Could not start recording" },
-      { status: 500 },
+    return fail(
+      err instanceof Error ? err.message : "Could not start recording",
     );
   }
 }

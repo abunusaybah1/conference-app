@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { RECORDING_BUCKET, supabaseAdmin } from "@/lib/supabase";
-import { sendPending } from "@/lib/mailer";
+import {
+  RECORDING_COLUMNS,
+  RecordingRow,
+  refreshRecording,
+} from "@/lib/recordings";
 
-export const runtime = "nodejs";
-export const maxDuration = 60;
-
-// Called by a scheduler. Sends any emails still pending (e.g. when the
-// provider's daily limit was hit), then deletes expired recordings.
+// Called by a scheduler. Settles recordings nobody has opened yet (so their
+// 48-hour clock starts), then deletes expired files.
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
@@ -14,22 +15,21 @@ export async function GET(req: NextRequest) {
   }
 
   const db = supabaseAdmin();
-  const nowIso = new Date().toISOString();
 
-  // 1) Finish sending links for recordings that are still downloadable
-  const { data: live } = await db
+  // 1) Recordings still marked "recording": ask LiveKit if they have finished
+  const { data: open } = await db
     .from("recordings")
-    .select("id")
-    .eq("status", "ready")
-    .is("deleted_at", null)
-    .gt("expires_at", nowIso);
-
-  for (const r of live ?? []) await sendPending(r.id, 20_000);
+    .select(RECORDING_COLUMNS)
+    .eq("status", "recording");
+  for (const r of (open ?? []) as RecordingRow[]) {
+    await refreshRecording(r).catch((e) => console.error("refresh failed", e));
+  }
 
   // 2) Delete expired recordings
+  const nowIso = new Date().toISOString();
   const { data: expired } = await db
     .from("recordings")
-    .select("id, room_name, file_path")
+    .select("id, file_path")
     .is("deleted_at", null)
     .not("expires_at", "is", null)
     .lt("expires_at", nowIso);
@@ -44,16 +44,6 @@ export async function GET(req: NextRequest) {
       continue; // try again on the next run
     }
     await db.from("recordings").update({ deleted_at: nowIso }).eq("id", r.id);
-    await db.from("recording_recipients").delete().eq("recording_id", r.id);
-
-    // Forget the attendee emails of this class once nothing is left of it
-    const { count } = await db
-      .from("recordings")
-      .select("id", { count: "exact", head: true })
-      .eq("room_name", r.room_name)
-      .is("deleted_at", null);
-    if (!count)
-      await db.from("attendees").delete().eq("room_name", r.room_name);
     deleted++;
   }
 

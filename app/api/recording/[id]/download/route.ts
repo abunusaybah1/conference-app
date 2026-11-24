@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { RECORDING_BUCKET, supabaseAdmin } from "@/lib/supabase";
-
-export const runtime = "nodejs";
+import { getRecording, isDownloadable } from "@/lib/recordings";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -14,30 +13,19 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const db = supabaseAdmin();
-  const { data: rec } = await db
-    .from("recordings")
-    .select("file_path, status, expires_at, deleted_at, created_at")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (
-    !rec ||
-    rec.status !== "ready" ||
-    rec.deleted_at ||
-    !rec.expires_at ||
-    new Date(rec.expires_at) < new Date()
-  ) {
+  const rec = await getRecording(id);
+  if (!isDownloadable(rec)) {
     return NextResponse.json(
       { error: "This recording is no longer available" },
       { status: 410 },
     );
   }
 
-  const day = rec.created_at.slice(0, 10);
-  const { data, error } = await db.storage
-    .from(RECORDING_BUCKET)
-    .createSignedUrl(rec.file_path, 60, { download: `class-${day}.ogg` });
+  const { data, error } = await supabaseAdmin()
+    .storage.from(RECORDING_BUCKET)
+    .createSignedUrl(rec.file_path, 60, {
+      download: `class-${rec.created_at.slice(0, 10)}.ogg`,
+    });
 
   if (error || !data) {
     console.error("signed url failed", error);

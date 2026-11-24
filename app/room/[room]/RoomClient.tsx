@@ -27,6 +27,7 @@ import {
   type RoomOptions,
 } from "livekit-client";
 import RecordButton from "@/components/RecordButton";
+import RecordingLinks from "@/components/RecordingLinks";
 
 type Action =
   | "mute"
@@ -97,30 +98,25 @@ function readSaved(room: string): Saved | null {
   return null;
 }
 
-function readStored(key: string): string {
+function readName(): string {
   try {
-    return localStorage.getItem(key) ?? "";
+    return localStorage.getItem("lk-name") ?? "";
   } catch {
     return "";
   }
 }
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Props = { room: string; hostKey: string };
 
 export default function RoomClient({ room, hostKey }: Props) {
   // On load / refresh: reconnect automatically if this tab already joined
   const [saved] = useState(() => readSaved(room));
-  const [name, setName] = useState(() => saved?.name ?? readStored("lk-name"));
-  const [email, setEmail] = useState(() => readStored("lk-email"));
+  const [name, setName] = useState(() => saved?.name ?? readName());
   const [token, setToken] = useState(saved?.token ?? "");
   const [isHost, setIsHost] = useState(saved?.isHost ?? false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
   const [left, setLeft] = useState(false);
-
-  const canJoin = name.trim() !== "" && EMAIL_RE.test(email.trim());
 
   async function join() {
     setJoining(true);
@@ -128,7 +124,7 @@ export default function RoomClient({ room, hostKey }: Props) {
     const res = await fetch("/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room, name, email, hostKey }),
+      body: JSON.stringify({ room, name, hostKey }),
     });
     const data = await res.json().catch(() => ({}));
     setJoining(false);
@@ -142,7 +138,6 @@ export default function RoomClient({ room, hostKey }: Props) {
       };
       sessionStorage.setItem(sessionKey(room), JSON.stringify(saved));
       localStorage.setItem("lk-name", name.trim());
-      localStorage.setItem("lk-email", email.trim());
     } catch {
       // ignore
     }
@@ -159,6 +154,8 @@ export default function RoomClient({ room, hostKey }: Props) {
     setLeft(true);
   }
 
+  // The token is kept in state on purpose: it lets the "class ended" screen
+  // ask for this class's recording. It is cleared when joining again.
   function joinAgain() {
     setLeft(false);
     setToken("");
@@ -169,9 +166,7 @@ export default function RoomClient({ room, hostKey }: Props) {
     return (
       <main className="min-h-dvh bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4 p-4">
         <p>You left the class, or it has ended.</p>
-        <p className="max-w-xs text-center text-sm text-neutral-400">
-          If the class was recorded, a download link will be emailed to you.
-        </p>
+        {token && <RecordingLinks token={token} isHost={isHost} />}
         <button
           onClick={joinAgain}
           className="rounded-md bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-medium"
@@ -197,28 +192,15 @@ export default function RoomClient({ room, hostKey }: Props) {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && name.trim() && !joining) join();
+            }}
             placeholder="Your name"
             className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3 text-base"
           />
-          <input
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && canJoin && !joining) join();
-            }}
-            placeholder="Your email"
-            className="w-full rounded-md bg-neutral-900 border border-neutral-800 px-3 py-3 text-base"
-          />
-          <p className="text-xs text-neutral-500">
-            If the class is recorded, we email you a link to download the audio.
-            The link works for 48 hours.
-          </p>
           <button
             onClick={join}
-            disabled={!canJoin || joining}
+            disabled={!name.trim() || joining}
             className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-3 font-medium"
           >
             {joining ? "Connecting…" : "Continue"}

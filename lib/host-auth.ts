@@ -1,25 +1,35 @@
 import { NextRequest } from "next/server";
 import { TokenVerifier } from "livekit-server-sdk";
 
-// Reads the caller's LiveKit token (Authorization: Bearer ...) and returns the
-// room only if that token belongs to the host (roomAdmin). The room always
-// comes from the signed token, never from the request body.
-export async function getHostRoom(req: NextRequest): Promise<string | null> {
+async function claimsOf(req: NextRequest) {
   const token = (req.headers.get("authorization") ?? "").replace(
     /^Bearer /,
     "",
   );
   if (!token) return null;
-
   try {
-    const claims = await new TokenVerifier(
+    return await new TokenVerifier(
       process.env.LIVEKIT_API_KEY!,
       process.env.LIVEKIT_API_SECRET!,
     ).verify(token);
-
-    if (!claims.video?.room || !claims.video.roomAdmin) return null;
-    return claims.video.room;
   } catch {
     return null;
   }
+}
+
+// Anyone who joined the class (host or student), identified by their signed
+// LiveKit token. The room always comes from the token, never from the body.
+export async function getMember(
+  req: NextRequest,
+): Promise<{ room: string; isHost: boolean } | null> {
+  const claims = await claimsOf(req);
+  const room = claims?.video?.room;
+  if (!room) return null;
+  return { room, isHost: claims?.video?.roomAdmin === true };
+}
+
+// Only the host of the class.
+export async function getHostRoom(req: NextRequest): Promise<string | null> {
+  const member = await getMember(req);
+  return member?.isHost ? member.room : null;
 }

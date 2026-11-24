@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getActiveEgress, getEgressClient } from "@/lib/egress";
 import { getHostRoom } from "@/lib/host-auth";
 
-export const runtime = "nodejs";
-
 export async function POST(req: NextRequest) {
   const room = await getHostRoom(req);
   if (!room) {

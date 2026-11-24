@@ -3,8 +3,6 @@ import { getActiveEgress, getEgressClient, startRecording } from "@/lib/egress";
 import { getHostRoom } from "@/lib/host-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
-export const runtime = "nodejs";
-
 export async function POST(req: NextRequest) {
   const room = await getHostRoom(req);
   if (!room) {
